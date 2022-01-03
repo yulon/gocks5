@@ -37,7 +37,7 @@ func (con *Conn) ReadAddr() (byte, net.Addr, error) {
 		if err != nil {
 			return vtra[1], nil, err
 		}
-		return vtra[1], &IPWPAddr{
+		return vtra[1], &IPAddr{
 			IP:   net.IPv4(addrBytes[0], addrBytes[1], addrBytes[2], addrBytes[3]),
 			Port: (int(addrBytes[4]) << 8) | int(addrBytes[5]),
 		}, nil
@@ -48,7 +48,7 @@ func (con *Conn) ReadAddr() (byte, net.Addr, error) {
 		if err != nil {
 			return vtra[1], nil, err
 		}
-		return vtra[1], &IPWPAddr{
+		return vtra[1], &IPAddr{
 			IP:   addrBytes[:16],
 			Port: (int(addrBytes[16]) << 8) | int(addrBytes[17]),
 		}, nil
@@ -73,8 +73,8 @@ func (con *Conn) ReadAddr() (byte, net.Addr, error) {
 func (con *Conn) ResolveRemoteAddr(addr net.Addr) (net.Addr, error) {
 	var port int
 	switch addr.(type) {
-	case *IPWPAddr:
-		port = addr.(*IPWPAddr).Port
+	case *IPAddr:
+		port = addr.(*IPAddr).Port
 	case *net.TCPAddr:
 		port = addr.(*net.TCPAddr).Port
 	case *net.UDPAddr:
@@ -92,7 +92,7 @@ func (con *Conn) ResolveRemoteAddr(addr net.Addr) (net.Addr, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &IPWPAddr{IP: negSvrTCPAddr.IP, Port: port, Zone: negSvrTCPAddr.Zone}, nil
+	return &IPAddr{IP: negSvrTCPAddr.IP, Port: port, Zone: negSvrTCPAddr.Zone}, nil
 }
 
 type udpConn struct {

@@ -6,14 +6,13 @@ import (
 	"strings"
 )
 
-// IP with port address
-type IPWPAddr struct {
+type IPAddr struct {
 	IP   net.IP
 	Port int
 	Zone string // IPv6 scoped addressing zone
 }
 
-func (a *IPWPAddr) Network() string { return "ipwp" }
+func (a *IPAddr) Network() string { return "ip" }
 
 func ipEmptyString(ip net.IP) string {
 	if len(ip) == 0 {
@@ -22,7 +21,7 @@ func ipEmptyString(ip net.IP) string {
 	return ip.String()
 }
 
-func (a *IPWPAddr) String() string {
+func (a *IPAddr) String() string {
 	if a == nil {
 		return "<nil>"
 	}
@@ -48,9 +47,9 @@ func AddrToTCP(addr net.Addr) (*net.TCPAddr, error) {
 	case *net.TCPAddr:
 		return addr.(*net.TCPAddr), nil
 
-	case *IPWPAddr:
-		ipwpAddr := addr.(*IPWPAddr)
-		return &net.TCPAddr{IP: ipwpAddr.IP, Port: ipwpAddr.Port, Zone: ipwpAddr.Zone}, nil
+	case *IPAddr:
+		ipAddr := addr.(*IPAddr)
+		return &net.TCPAddr{IP: ipAddr.IP, Port: ipAddr.Port, Zone: ipAddr.Zone}, nil
 
 	case *net.UDPAddr:
 		udpAddr := addr.(*net.UDPAddr)
@@ -64,9 +63,9 @@ func AddrToUDP(addr net.Addr) (*net.UDPAddr, error) {
 	case *net.UDPAddr:
 		return addr.(*net.UDPAddr), nil
 
-	case *IPWPAddr:
-		ipwpAddr := addr.(*IPWPAddr)
-		return &net.UDPAddr{IP: ipwpAddr.IP, Port: ipwpAddr.Port, Zone: ipwpAddr.Zone}, nil
+	case *IPAddr:
+		ipAddr := addr.(*IPAddr)
+		return &net.UDPAddr{IP: ipAddr.IP, Port: ipAddr.Port, Zone: ipAddr.Zone}, nil
 
 	case *net.TCPAddr:
 		tcpAddr := addr.(*net.TCPAddr)
@@ -75,7 +74,7 @@ func AddrToUDP(addr net.Addr) (*net.UDPAddr, error) {
 	return net.ResolveUDPAddr("udp", addr.String())
 }
 
-func IPWPToBytes(ip net.IP, port int) []byte {
+func IPPortToBytes(ip net.IP, port int) []byte {
 	ipv4 := ip.To4()
 	if ipv4 != nil {
 		b := make([]byte, 7)
@@ -97,15 +96,15 @@ func AddrToBytes(addr net.Addr) []byte {
 	switch addr.(type) {
 	case *net.TCPAddr:
 		tcpAddr := addr.(*net.TCPAddr)
-		return IPWPToBytes(tcpAddr.IP, tcpAddr.Port)
+		return IPPortToBytes(tcpAddr.IP, tcpAddr.Port)
 
 	case *net.UDPAddr:
 		udpAddr := addr.(*net.UDPAddr)
-		return IPWPToBytes(udpAddr.IP, udpAddr.Port)
+		return IPPortToBytes(udpAddr.IP, udpAddr.Port)
 
-	case *IPWPAddr:
-		ipwpAddr := addr.(*IPWPAddr)
-		return IPWPToBytes(ipwpAddr.IP, ipwpAddr.Port)
+	case *IPAddr:
+		ipAddr := addr.(*IPAddr)
+		return IPPortToBytes(ipAddr.IP, ipAddr.Port)
 	}
 
 	dap := strings.Split(addr.String(), ":")

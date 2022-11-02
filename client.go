@@ -6,20 +6,13 @@ import (
 	"time"
 )
 
-func dial(addr string) (*Conn, error) {
+func Pass(addr, user, passwd string) (*Conn, time.Duration, error) {
 	tcpCon, err := net.Dial("tcp", addr)
-	if err != nil {
-		return nil, err
-	}
-	return &Conn{tcpCon}, nil
-}
-
-func Dial(addr, user, pass string) (*Conn, time.Duration, error) {
-	con, err := dial(addr)
 	if err != nil {
 		return nil, -1, err
 	}
-	rtt, err := con.sendHandshake(user, pass)
+	con := &Conn{tcpCon}
+	rtt, err := con.sendHandshake(user, passwd)
 	if err != nil {
 		con.Close()
 		return nil, rtt, err
@@ -34,10 +27,10 @@ var ErrorBadCertificate = errors.New("bad certificate")
 var ErrorInvalidCertificate = errors.New("invalid certificate")
 var ErrorAuthenticationFailed = errors.New("authentication failed")
 
-func (con *Conn) sendHandshake(user, pass string) (time.Duration, error) {
+func (con *Conn) sendHandshake(user, passwd string) (time.Duration, error) {
 	userLen := len(user)
-	passLen := len(pass)
-	hasUserPass := userLen > 0 || passLen > 0
+	passwdLen := len(passwd)
+	hasUserPasswd := userLen > 0 || passwdLen > 0
 
 	/*
 		+----+----------+----------+
@@ -48,8 +41,8 @@ func (con *Conn) sendHandshake(user, pass string) (time.Duration, error) {
 	*/
 
 	p := []byte{Ver, 1, MethodNone}
-	if hasUserPass {
-		if userLen == 0 || userLen > 255 || passLen == 0 || passLen > 255 {
+	if hasUserPasswd {
+		if userLen == 0 || userLen > 255 || passwdLen == 0 || passwdLen > 255 {
 			return -1, ErrorBadCertificate
 		}
 		p[1]++
@@ -62,7 +55,7 @@ func (con *Conn) sendHandshake(user, pass string) (time.Duration, error) {
 	if err != nil {
 		return -1, err
 	}
-	authSz := 3 + userLen + passLen
+	authSz := 3 + userLen + passwdLen
 	buf := make([]byte, authSz)
 
 	/*
@@ -106,10 +99,10 @@ func (con *Conn) sendHandshake(user, pass string) (time.Duration, error) {
 		copy(buf[base:], []byte(user))
 
 		base += userLen
-		buf[base] = byte(passLen)
+		buf[base] = byte(passwdLen)
 
 		base++
-		copy(buf[base:], []byte(pass))
+		copy(buf[base:], []byte(passwd))
 
 		err := writeAll(con, buf)
 		if err != nil {
@@ -197,8 +190,8 @@ func (con *Conn) DialTCP(addr net.Addr) (net.Conn, time.Duration, error) {
 	return con.Conn, rtt, nil
 }
 
-func DialTCP(server, user, pass string, dst net.Addr) (net.Conn, time.Duration, time.Duration, error) {
-	con, pxyRtt, err := Dial(server, user, pass)
+func DialTCPPass(server, user, passwd string, dst net.Addr) (net.Conn, time.Duration, time.Duration, error) {
+	con, pxyRtt, err := Pass(server, user, passwd)
 	if err != nil {
 		return nil, pxyRtt, -1, err
 	}
@@ -230,8 +223,8 @@ func (con *Conn) ListenUDP() (net.PacketConn, time.Duration, error) {
 	return &udpConn{con.Conn, udpPxyUDPCon}, rtt, nil
 }
 
-func ListenUDP(server, user, pass string) (net.PacketConn, time.Duration, time.Duration, error) {
-	con, pxyRtt, err := Dial(server, user, pass)
+func ListenUDPPass(server, user, passwd string) (net.PacketConn, time.Duration, time.Duration, error) {
+	con, pxyRtt, err := Pass(server, user, passwd)
 	if err != nil {
 		return nil, pxyRtt, -1, err
 	}

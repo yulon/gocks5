@@ -4,15 +4,13 @@ import (
 	"errors"
 	"net"
 	"time"
+
+	"github.com/yulon/go-netil"
 )
 
-func Pass(addr, user, passwd string) (*Conn, time.Duration, error) {
-	tcpCon, err := net.Dial("tcp", addr)
-	if err != nil {
-		return nil, -1, err
-	}
-	con := &Conn{tcpCon}
-	rtt, err := con.sendHandshake(user, passwd)
+func PassRawConn(rawCon net.Conn, username, password string) (*Conn, time.Duration, error) {
+	con := newConn(rawCon)
+	rtt, err := con.sendHandshake(username, password)
 	if err != nil {
 		con.Close()
 		return nil, rtt, err
@@ -20,17 +18,25 @@ func Pass(addr, user, passwd string) (*Conn, time.Duration, error) {
 	return con, rtt, nil
 }
 
-var ErrorNotSuportedGSSAPI = errors.New("not suported GSSAPI")
-var ErrorNoMethodAvailabled = errors.New("no method availabled")
+func Pass(proxy, username, password string) (*Conn, time.Duration, error) {
+	tcpCon, err := net.Dial("tcp", proxy)
+	if err != nil {
+		return nil, -1, err
+	}
+	return PassRawConn(tcpCon, username, password)
+}
+
+var ErrorUnsupportedGSSAPI = errors.New("unsupported GSSAPI")
+var ErrorUnsupportedMethods = errors.New("unsupported methods")
 var ErrorUnknowMethod = errors.New("unknow method")
 var ErrorBadCertificate = errors.New("bad certificate")
 var ErrorInvalidCertificate = errors.New("invalid certificate")
-var ErrorAuthenticationFailed = errors.New("authentication failed")
+var ErrorUnauthorized = errors.New("unauthorized")
 
-func (con *Conn) sendHandshake(user, passwd string) (time.Duration, error) {
-	userLen := len(user)
-	passwdLen := len(passwd)
-	hasUserPasswd := userLen > 0 || passwdLen > 0
+func (con *Conn) sendHandshake(username, password string) (time.Duration, error) {
+	usernameLen := len(username)
+	passwordLen := len(password)
+	hasUsernamePassword := usernameLen > 0 || passwordLen > 0
 
 	/*
 		+----+----------+----------+
@@ -41,8 +47,8 @@ func (con *Conn) sendHandshake(user, passwd string) (time.Duration, error) {
 	*/
 
 	p := []byte{Ver, 1, MethodNone}
-	if hasUserPasswd {
-		if userLen == 0 || userLen > 255 || passwdLen == 0 || passwdLen > 255 {
+	if hasUsernamePassword {
+		if usernameLen == 0 || usernameLen > 255 || passwordLen == 0 || passwordLen > 255 {
 			return -1, ErrorBadCertificate
 		}
 		p[1]++
@@ -51,11 +57,11 @@ func (con *Conn) sendHandshake(user, passwd string) (time.Duration, error) {
 
 	now := time.Now()
 
-	err := writeAll(con, p)
+	err := netil.WriteAll(con, p)
 	if err != nil {
 		return -1, err
 	}
-	authSz := 3 + userLen + passwdLen
+	authSz := 3 + usernameLen + passwordLen
 	buf := make([]byte, authSz)
 
 	/*
@@ -66,7 +72,7 @@ func (con *Conn) sendHandshake(user, passwd string) (time.Duration, error) {
 		+----+--------+
 	*/
 
-	err = readFull(con, buf[:2])
+	err = netil.ReadFull(con, buf[:2])
 	if err != nil {
 		return -1, err
 	}
@@ -78,7 +84,7 @@ func (con *Conn) sendHandshake(user, passwd string) (time.Duration, error) {
 		return rtt, nil
 
 	case MethodGSSAPI:
-		return rtt, ErrorNotSuportedGSSAPI
+		return rtt, ErrorUnsupportedGSSAPI
 
 	case MethodUsernamePassword:
 		/*
@@ -93,18 +99,18 @@ func (con *Conn) sendHandshake(user, passwd string) (time.Duration, error) {
 		buf[base] = UserPassVer
 
 		base++
-		buf[base] = byte(userLen)
+		buf[base] = byte(usernameLen)
 
 		base++
-		copy(buf[base:], []byte(user))
+		copy(buf[base:], []byte(username))
 
-		base += userLen
-		buf[base] = byte(passwdLen)
+		base += usernameLen
+		buf[base] = byte(passwordLen)
 
 		base++
-		copy(buf[base:], []byte(passwd))
+		copy(buf[base:], []byte(password))
 
-		err := writeAll(con, buf)
+		err := netil.WriteAll(con, buf)
 		if err != nil {
 			return rtt, err
 		}
@@ -117,29 +123,29 @@ func (con *Conn) sendHandshake(user, passwd string) (time.Duration, error) {
 			+----+--------+
 		*/
 
-		err = readFull(con, buf[:2])
+		err = netil.ReadFull(con, buf[:2])
 		if err != nil {
 			return rtt, err
 		}
 
 		if buf[1] != UserPassStatusSuccess {
-			return rtt, ErrorAuthenticationFailed
+			return rtt, ErrorUnauthorized
 		}
 		return rtt, nil
 
 	case MethodUnsupportAll:
-		return rtt, ErrorNoMethodAvailabled
+		return rtt, ErrorUnsupportedMethods
 	}
 	return rtt, ErrorUnknowMethod
 }
 
 var ErrorServerFailure = errors.New("server failure")
-var ErrorNotAllowed = errors.New("request not allowed")
+var ErrorNotAllowed = errors.New("not allowed")
 var ErrorNetworkUnreachable = errors.New("network unreachable")
 var ErrorHostUnreachable = errors.New("host unreachable")
 var ErrorConnectionRefused = errors.New("connection refused")
 var ErrorTTLExpired = errors.New("TTL expired")
-var ErrorCommandNotSupported = errors.New("request command not supported")
+var ErrorCommandNotSupported = errors.New("command not supported")
 var ErrorAddressNotSupported = errors.New("address not supported")
 var ErrorUnknowReply = errors.New("unknow reply")
 
@@ -190,12 +196,12 @@ func (con *Conn) DialTCP(addr net.Addr) (net.Conn, time.Duration, error) {
 	return con.Conn, rtt, nil
 }
 
-func DialTCPPass(server, user, passwd string, dst net.Addr) (net.Conn, time.Duration, time.Duration, error) {
-	con, pxyRtt, err := Pass(server, user, passwd)
+func DialTCPPass(proxy, username, password string, addr net.Addr) (net.Conn, time.Duration, time.Duration, error) {
+	con, pxyRtt, err := Pass(proxy, username, password)
 	if err != nil {
 		return nil, pxyRtt, -1, err
 	}
-	tcpCon, dstRtt, err := con.DialTCP(dst)
+	tcpCon, dstRtt, err := con.DialTCP(addr)
 	if err != nil {
 		con.Close()
 		return nil, pxyRtt, dstRtt, err
@@ -204,27 +210,27 @@ func DialTCPPass(server, user, passwd string, dst net.Addr) (net.Conn, time.Dura
 }
 
 func (con *Conn) ListenUDP() (net.PacketConn, time.Duration, error) {
-	udpPxyAddr, rtt, err := con.Command(CmdUDP, &net.UDPAddr{IP: net.IPv4zero, Port: 0})
+	udpPxyAddr, rtt, err := con.Command(CmdUDPAssociate, &net.UDPAddr{IP: net.IPv4zero, Port: 0})
 	if err != nil {
 		return nil, rtt, err
 	}
-	udpPxyPubAddr, err := con.ResolveRemoteAddr(udpPxyAddr)
+	udpPxyPubAddr, err := netil.PublicAddr(udpPxyAddr, con.RemoteAddr())
 	if err != nil {
 		return nil, rtt, err
 	}
-	udpPxyPubUDPAddr, err := AddrToUDP(udpPxyPubAddr)
+	udpPxyPubUDPAddr, err := netil.ToUDPAddr(udpPxyPubAddr)
 	if err != nil {
 		return nil, rtt, err
 	}
-	udpPxyUDPCon, err := net.DialUDP("udp", nil, udpPxyPubUDPAddr)
+	udpPxyClt, err := net.ListenUDP("udp", nil)
 	if err != nil {
 		return nil, rtt, err
 	}
-	return &udpConn{con.Conn, udpPxyUDPCon}, rtt, nil
+	return &packetConn{udpPxyClt, udpPxyPubUDPAddr, con.Conn}, rtt, nil
 }
 
-func ListenUDPPass(server, user, passwd string) (net.PacketConn, time.Duration, time.Duration, error) {
-	con, pxyRtt, err := Pass(server, user, passwd)
+func ListenUDPPass(proxy, username, password string) (net.PacketConn, time.Duration, time.Duration, error) {
+	con, pxyRtt, err := Pass(proxy, username, password)
 	if err != nil {
 		return nil, pxyRtt, -1, err
 	}

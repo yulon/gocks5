@@ -24,8 +24,8 @@ const (
 	CmdConnect byte = 0x01
 	// CmdBind is bind command
 	CmdBind byte = 0x02
-	// CmdUDP is UDP command
-	CmdUDP byte = 0x03
+	// CmdUDPAssociate is UDPAssociate command
+	CmdUDPAssociate byte = 0x03
 
 	// AtypIPv4 is ipv4 address type
 	AtypIPv4 byte = 0x01 // 4 octets

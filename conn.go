@@ -1,14 +1,26 @@
 package gocks5
 
 import (
+	"bufio"
 	"errors"
+	"fmt"
 	"net"
 	"strconv"
-	"strings"
+
+	"github.com/yulon/go-netil"
 )
 
 type Conn struct {
 	net.Conn
+	br *bufio.Reader
+}
+
+func newConn(rawCon net.Conn) *Conn {
+	return &Conn{rawCon, bufio.NewReader(rawCon)}
+}
+
+func (con *Conn) Read(p []byte) (n int, err error) {
+	return con.br.Read(p)
 }
 
 func (con *Conn) WriteAddr(typ byte, addr net.Addr) error {
@@ -19,85 +31,55 @@ func (con *Conn) WriteAddr(typ byte, addr net.Addr) error {
 		| 1  |  1  | X'00' |  1   | Variable |  2   |
 		+----+-----+-------+------+----------+------+
 	*/
-	return writeAll(con, append([]byte{Ver, typ, 0}, AddrToBytes(addr)...))
+	return netil.WriteAll(con, append([]byte{Ver, typ, 0}, AddrToBytes(addr)...))
 }
 
 var ErrorUnknowAddress = errors.New("unknow address")
 
 func (con *Conn) ReadAddr() (byte, net.Addr, error) {
 	var vtra [4]byte
-	err := readFull(con, vtra[:])
+	err := netil.ReadFull(con, vtra[:])
 	if err != nil {
 		return 0, nil, err
 	}
 	switch vtra[3] {
 	case AtypIPv4:
 		var addrBytes [6]byte
-		err := readFull(con, addrBytes[:])
+		err := netil.ReadFull(con, addrBytes[:])
 		if err != nil {
 			return vtra[1], nil, err
 		}
-		return vtra[1], &IPAddr{
+		return vtra[1], &netil.IPPortAddr{
 			IP:   net.IPv4(addrBytes[0], addrBytes[1], addrBytes[2], addrBytes[3]),
 			Port: (int(addrBytes[4]) << 8) | int(addrBytes[5]),
 		}, nil
 
 	case AtypIPv6:
 		var addrBytes [18]byte
-		err := readFull(con, addrBytes[:])
+		err := netil.ReadFull(con, addrBytes[:])
 		if err != nil {
 			return vtra[1], nil, err
 		}
-		return vtra[1], &IPAddr{
+		return vtra[1], &netil.IPPortAddr{
 			IP:   addrBytes[:16],
 			Port: (int(addrBytes[16]) << 8) | int(addrBytes[17]),
 		}, nil
 
 	case AtypDomain:
 		var domainLenBuf [1]byte
-		err := readFull(con, domainLenBuf[:])
+		err := netil.ReadFull(con, domainLenBuf[:])
 		if err != nil {
 			return vtra[1], nil, err
 		}
 		domainLen := int(domainLenBuf[0])
 		addrBytes := make([]byte, domainLen+2)
-		err = readFull(con, addrBytes)
+		err = netil.ReadFull(con, addrBytes)
 		if err != nil {
 			return vtra[1], nil, err
 		}
-		return vtra[1], DomainAddr(string(addrBytes[:domainLen]) + ":" + strconv.Itoa((int(addrBytes[domainLen])<<8)|int(addrBytes[domainLen+1]))), nil
+		return vtra[1], netil.DomainAddr(string(addrBytes[:domainLen]) + ":" + strconv.Itoa((int(addrBytes[domainLen])<<8)|int(addrBytes[domainLen+1]))), nil
 	}
 	return vtra[1], nil, ErrorUnknowAddress
-}
-
-func (con *Conn) ResolveRemoteAddr(addr net.Addr) (net.Addr, error) {
-	var port int
-	switch addr.(type) {
-	case *IPAddr:
-		port = addr.(*IPAddr).Port
-	case *net.TCPAddr:
-		port = addr.(*net.TCPAddr).Port
-	case *net.UDPAddr:
-		port = addr.(*net.UDPAddr).Port
-	default:
-		addrStr := addr.String()
-		pos := strings.LastIndexByte(addr.String(), ':')
-		var err error
-		port, err = strconv.Atoi(addrStr[pos+1:])
-		if err != nil {
-			return nil, err
-		}
-	}
-	negSvrTCPAddr, err := AddrToTCP(con.RemoteAddr())
-	if err != nil {
-		return nil, err
-	}
-	return &IPAddr{IP: negSvrTCPAddr.IP, Port: port, Zone: negSvrTCPAddr.Zone}, nil
-}
-
-type udpConn struct {
-	negCon net.Conn
-	net.Conn
 }
 
 func makeUDPPacket(addr net.Addr, data []byte) []byte {
@@ -105,18 +87,30 @@ func makeUDPPacket(addr net.Addr, data []byte) []byte {
 	if len(addrByts) == 0 {
 		return nil
 	}
-	return append([]byte{0, 0, 0}, append(AddrToBytes(addr), data...)...)
+	return append([]byte{0, 0, 0}, append(addrByts, data...)...)
 }
 
-func (con *udpConn) WriteTo(data []byte, addr net.Addr) (int, error) {
-	pkt := makeUDPPacket(addr, data)
-	if len(pkt) == 0 {
-		return 0, ErrorAddressNotSupported
+func makeUDPHeaderToBack(b []byte, addr net.Addr) int {
+	n := AddrToBytesBack(b, addr)
+	if n == 0 {
+		return 0
 	}
-	return con.Write(pkt)
+	lst := len(b) - 1 - n
+	b[lst-2] = 0
+	b[lst-1] = 0
+	b[lst] = 0
+	return 3 + n
 }
+
+var ErrorUnsupportedUDPFragment = errors.New("unsupported UDP fragments")
 
 func parseUDPPacket(p []byte) (net.Addr, []byte, error) {
+	if p[0] != 0 || p[1] != 0 {
+		return nil, nil, fmt.Errorf("unsupported UDP package header, %+v", int(p[0])<<8|int(p[1]))
+	}
+	if p[2] != 0 {
+		return nil, nil, ErrorUnsupportedUDPFragment
+	}
 	p = p[3:]
 	switch p[0] {
 	case AtypIPv4:
@@ -133,28 +127,66 @@ func parseUDPPacket(p []byte) (net.Addr, []byte, error) {
 
 	case AtypDomain:
 		domainLen := int(p[1])
-		return DomainAddr(string(p[2:domainLen]) + ":" + strconv.Itoa((int(p[2+domainLen])<<8)|int(p[3+domainLen]))), p[4+domainLen:], nil
+		return netil.DomainAddr(string(p[2:domainLen]) + ":" + strconv.Itoa((int(p[2+domainLen])<<8)|int(p[3+domainLen]))), p[4+domainLen:], nil
 	}
 	return nil, nil, ErrorUnknowAddress
 }
 
-func (con *udpConn) ReadFrom(b []byte) (int, net.Addr, error) {
-	n, err := con.Read(b)
-	if err != nil {
-		return 0, nil, err
-	}
-	addr, data, err := parseUDPPacket(b[:n])
-	if err != nil {
-		return 0, nil, err
-	}
-	return copy(b, data), addr, nil
+type packetConn struct {
+	net.PacketConn
+	pxyAddr      net.Addr
+	keepAliveCon net.Conn
 }
 
-func (con *udpConn) Close() error {
-	err := con.negCon.Close()
-	if err != nil {
-		con.Conn.Close()
+func newPacketConn(rawCon net.PacketConn, pxyAddr net.Addr, keepAliveCon net.Conn) *packetConn {
+	return &packetConn{rawCon, pxyAddr, keepAliveCon}
+}
+
+func (pcon *packetConn) ReadFrom(b []byte) (n int, raddr net.Addr, err error) {
+	n, _, raddr, err = pcon.ReadFromForward(b)
+	return
+}
+
+func (pcon *packetConn) WriteTo(data []byte, raddr net.Addr) (int, error) {
+	return pcon.WriteToForward(data, pcon.pxyAddr, raddr)
+}
+
+func (pcon *packetConn) Close() error {
+	err := pcon.PacketConn.Close()
+	if pcon.keepAliveCon == nil {
 		return err
 	}
-	return con.Conn.Close()
+	if err != nil {
+		pcon.keepAliveCon.Close()
+		return err
+	}
+	return pcon.keepAliveCon.Close()
+}
+
+func (pcon *packetConn) RemoteAddr() net.Addr {
+	return pcon.pxyAddr
+}
+
+func (pcon *packetConn) ReadFromForward(b []byte) (n int, raddr, faddr net.Addr, err error) {
+	var data []byte
+	for {
+		n, faddr, err = pcon.PacketConn.ReadFrom(b)
+		if err != nil {
+			return
+		}
+		raddr, data, err = parseUDPPacket(b[:n])
+		if err == nil {
+			break
+		}
+	}
+	n = copy(b, data)
+	return
+}
+
+func (pcon *packetConn) WriteToForward(data []byte, raddr, faddr net.Addr) (int, error) {
+	pkt := makeUDPPacket(raddr, data)
+	if len(pkt) == 0 {
+		return 0, ErrorAddressNotSupported
+	}
+	return pcon.PacketConn.WriteTo(pkt, faddr)
 }

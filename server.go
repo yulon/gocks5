@@ -350,7 +350,7 @@ func (svr *Server) forward(cltCon *Conn, username string, uc *UserConfig, isLimi
 func (svr *Server) handle(rawCon net.Conn, isLimitedConc bool, buf []byte) error {
 	needRecBuf := false
 	if len(buf) == 0 {
-		buf = make([]byte, 4096)
+		buf = make([]byte, 32*1024)
 	}
 
 	cltCon := newConn(rawCon)

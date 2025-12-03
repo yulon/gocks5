@@ -5,7 +5,6 @@ import (
 	"net"
 	"net/url"
 	"strconv"
-	"time"
 
 	"github.com/yulon/go-netil"
 )
@@ -21,7 +20,6 @@ type Server struct {
 	ProxyPacketConnPool    *netil.PacketConnPool
 	PublicPacketConnPool   *netil.PacketConnPool
 	DisableResponseError   bool
-	IdleTimeout            time.Duration
 }
 
 type UserConfig struct {
@@ -263,7 +261,7 @@ func (svr *Server) forward(cltCon *Conn, username string, uc *UserConfig, isLimi
 			return err
 		}
 
-		netil.ForwardTimeout(cltCon, destCon, buf, svr.IdleTimeout, 5*time.Second)
+		netil.Forward(cltCon, destCon, buf)
 
 		svr.streamForwardDone(isLimitedConc, needRecBuf, buf)
 		return nil

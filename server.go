@@ -244,16 +244,14 @@ func (svr *Server) forward(cltCon *Conn, username string, uc *UserConfig, isLimi
 			return err
 		}
 
-		destDialerAddr, err := netil.ToTCPAddr(destCon.LocalAddr())
+		destDialerAddr, err := netil.CopyToTCPAddr(destCon.LocalAddr())
 		if err != nil {
-			svr.streamForwardDone(isLimitedConc, needRecBuf, buf)
-			cltCon.Close()
-			destCon.Close()
-			return err
+			destDialerAddr = &net.TCPAddr{}
 		}
+		destDialerAddr.IP = net.IPv4zero
 
 		//err = cltCon.WriteAddr(RepSuccess, DomainAddr(":"+strconv.Itoa(destDialerAddr.Port)))
-		err = cltCon.WriteAddr(RepSuccess, &net.TCPAddr{IP: net.IPv4zero, Port: destDialerAddr.Port, Zone: destDialerAddr.Zone})
+		err = cltCon.WriteAddr(RepSuccess, destDialerAddr)
 		if err != nil {
 			svr.streamForwardDone(isLimitedConc, needRecBuf, buf)
 			cltCon.Close()
@@ -290,12 +288,13 @@ func (svr *Server) forward(cltCon *Conn, username string, uc *UserConfig, isLimi
 			return err
 		}
 
-		udpPxyAddr, err := netil.ToUDPAddr(udpPxyCon.LocalAddr())
+		udpPxyAddr, err := netil.CopyToUDPAddr(udpPxyCon.LocalAddr())
 		if err != nil {
-			cltCon.Close()
-			return err
+			udpPxyAddr = &net.UDPAddr{}
 		}
-		err = cltCon.WriteAddr(RepSuccess, &net.UDPAddr{IP: net.IPv4zero, Port: udpPxyAddr.Port, Zone: udpPxyAddr.Zone})
+		udpPxyAddr.IP = net.IPv4zero
+
+		err = cltCon.WriteAddr(RepSuccess, udpPxyAddr)
 		if err != nil {
 			cltCon.Close()
 			return err
@@ -320,13 +319,14 @@ func (svr *Server) forward(cltCon *Conn, username string, uc *UserConfig, isLimi
 	}
 	udpPxyCon := &packetConn{PacketConn: udpPxyRawCon, keepAliveCon: cltCon}
 
-	udpPxyAddr, err := netil.ToUDPAddr(udpPxyRawCon.LocalAddr())
+	udpPxyAddr, err := netil.CopyToUDPAddr(udpPxyRawCon.LocalAddr())
 	if err != nil {
-		udpPxyCon.Close()
-		return err
+		udpPxyAddr = &net.UDPAddr{}
 	}
+	udpPxyAddr.IP = net.IPv4zero
+
 	//err = cltCon.WriteAddr(RepSuccess, DomainAddr(":"+strconv.Itoa(udpPxyAddr.Port)))
-	err = cltCon.WriteAddr(RepSuccess, &net.UDPAddr{IP: net.IPv4zero, Port: udpPxyAddr.Port, Zone: udpPxyAddr.Zone})
+	err = cltCon.WriteAddr(RepSuccess, udpPxyAddr)
 	if err != nil {
 		udpPxyCon.Close()
 		return err
